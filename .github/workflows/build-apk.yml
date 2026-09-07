@@ -34,25 +34,69 @@ jobs:
 
       - name: Raspakiraj projekt
         run: |
-          unzip HEP-Mjerenja-Android-1.0-source.zip
-          cd hepmjerenja-android-final
-          ls
+          unzip -o HEP-Mjerenja-Android-1.0-source.zip
+
+      - name: Uskladi HEP HTTP zahtjev s izvornim Go klijentom
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('hepmjerenja-android-final/app/src/main/java/hr/hepmjerenja/mobile/HepApi.java')
+          s = p.read_text(encoding='utf-8')
+
+          s = s.replace(
+              'private static final String BASE="https://mjerenje.hep.hr/mjerenja/v1/api";',
+              'private static final String BASE="https://mjerenje.hep.hr/mjerenja/v1.1/api";'
+          )
+
+          s = s.replace(
+              'c.setConnectTimeout(20000); c.setReadTimeout(30000); c.setInstanceFollowRedirects(false);',
+              'c.setConnectTimeout(20000); c.setReadTimeout(30000); c.setInstanceFollowRedirects(true);'
+          )
+
+          s = s.replace(
+              'c.setRequestMethod("POST"); c.setRequestProperty("Accept","application/json, text/plain, */*");',
+              'c.setRequestMethod("POST"); c.setRequestProperty("User-Agent","Go-http-client/1.1"); c.setRequestProperty("Accept","application/json, text/plain, */*");'
+          )
+
+          s = s.replace(
+              'c.setDoOutput(true); c.setRequestProperty("Content-Type","application/json; charset=utf-8");\n                byte[] bytes=payload.getBytes("UTF-8"); c.setFixedLengthStreamingMode(bytes.length);',
+              'c.setDoOutput(true); c.setRequestProperty("Content-Type","application/json");\n                byte[] bytes=payload.getBytes("UTF-8");'
+          )
+
+          s = s.replace(
+              '} else if(status!=200) throw new ApiException("HEP trenutačno ne može obraditi zahtjev (HTTP "+status+").",false);',
+              '''} else if(status!=200) {
+                  String allow=c.getHeaderField("Allow");
+                  String detail=body.replace("\\r"," ").replace("\\n"," ").trim();
+                  if(detail.length()>180) detail=detail.substring(0,180);
+                  throw new ApiException(
+                      "HEP HTTP "+status+" na "+path+
+                      (allow==null?"":" · Allow: "+allow)+
+                      (detail.isEmpty()?"":" · "+detail),
+                      false
+                  );
+              }'''
+          )
+
+          p.write_text(s, encoding='utf-8')
+          print('HEP client patched')
+          PY
 
       - name: Pokreni testove
         run: |
           cd hepmjerenja-android-final
           bash tests/run.sh
 
-      - name: Izradi APK
+      - name: Izradi APK 1.0.2
         run: |
           cd hepmjerenja-android-final
-          sed -i 's|https://mjerenje.hep.hr/mjerenja/v1.1/api|https://mjerenje.hep.hr/mjerenja/v1/api|' app/src/main/java/hr/hepmjerenja/mobile/HepApi.java
           gradle --no-daemon :app:assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk ../HEP-Mjerenja-1.0.1.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../HEP-Mjerenja-1.0.2.apk
 
       - name: Spremi APK
         uses: actions/upload-artifact@v4
         with:
-          name: HEP-Mjerenja-Android-1.0.1
-          path: HEP-Mjerenja-1.0.1.apk
+          name: HEP-Mjerenja-Android-1.0.2
+          path: HEP-Mjerenja-1.0.2.apk
           if-no-files-found: error
